@@ -67,5 +67,8 @@ python main.py --input MyBook.pdf --action translate
 - `sections_<filename>/`: Contains the sliced PDF parts and extracted text files.
 - `translations_<filename>/`: Contains the final output from Gemini.
 
+## Acknowledgments
+This project was entirely authored and architected by **Google Gemini**.
+
 ## License
 MIT
