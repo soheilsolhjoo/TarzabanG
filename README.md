@@ -69,6 +69,3 @@ python main.py --input MyBook.pdf --action translate
 
 ## Acknowledgments
 This project was entirely authored and architected by **Google Gemini**.
-
-## License
-MIT
