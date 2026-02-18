@@ -1,5 +1,5 @@
 """
-TrazbanG
+TrazbanG - Gemini Translation Toolkit
 --------------------------
 An interactive tool for high-fidelity document translation using Google Gemini.
 
@@ -13,15 +13,20 @@ FOLDER STRUCTURE:
 - sections_<input_name>/: Created during 'slice' or 'extract'. Stores segment PDFs/TXTs.
 - translations_<input_name>/: Created during 'translate'. Stores final translations.
 
+Re-TRANSLATION:
+The code cannot re-translate a text, unless you remove/rename the existing translated file(s).
+
 COMMAND EXAMPLES:
 - Prepare everything for a new book (slice + extract):
-    python main.py --input Politics.pdf --action prepare
+    python main.py --input MyBook.pdf --action prepare
+- Translate with a custom glossary: (it can be either .json or .txt)
+    python main.py --input MyBook.pdf --action translate --glossary glossary.json
 - Translate only a specific range after you've refined the text:
-    python main.py --input Politics.pdf --action translate --start 5 --end 10
+    python main.py --input MyBook.pdf --action translate --start 5 --end 10
 - Translate a single section:
-    python main.py --input Book.pdf --action translate --index 3
+    python main.py --input MyBook.pdf --action translate --index 3
 - Full automation (not recommended for highest quality):
-    python main.py --input Book.pdf --action all
+    python main.py --input MyBook.pdf --action all
 """
 
 import os
@@ -55,6 +60,7 @@ def get_args():
     parser.add_argument("--action", choices=['slice', 'extract', 'translate', 'prepare', 'all'], default='all', 
                         help="Action to perform: slice (PDFs), extract (TXTs), translate (Gemini), prepare (slice+extract).")
     parser.add_argument("--lang", default=DEFAULT_LANG, help="Target language for translation.")
+    parser.add_argument("--glossary", default=GLOSSARY_PATH, help="Path to the glossary file (.txt or .json).")
     parser.add_argument("--index", type=int, help="Limit action to a single section index.")
     parser.add_argument("--start", type=int, help="Start index for range processing.")
     parser.add_argument("--end", type=int, help="End index for range processing.")
@@ -110,6 +116,36 @@ def get_ranges(pdf_path, mode):
     doc.close()
     return ranges
 
+def load_glossary(path):
+    """
+    Loads and formats the glossary for the AI prompt.
+    Supports .json (structured) and .txt (plain list).
+    """
+    if not os.path.exists(path):
+        return "N/A"
+    
+    # Handle JSON format
+    if path.lower().endswith('.json'):
+        import json
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Find the list of terms (works with your 'political_glossary' key or a raw list)
+            items = data.get('political_glossary', []) if isinstance(data, dict) else data
+            if isinstance(items, list):
+                return "\n".join([f"{item.get('term')}: {item.get('persian')}" for item in items if 'term' in item])
+        except Exception as e:
+            print(f"Warning: Failed to parse JSON glossary at {path}: {e}")
+            return "N/A"
+    
+    # Handle Plain Text format
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception as e:
+        print(f"Warning: Failed to read glossary file at {path}: {e}")
+        return "N/A"
+
 def main():
     args = get_args()
     sec_folder, out_folder = get_paths(args.input)
@@ -163,6 +199,9 @@ def main():
         if not os.path.exists(out_folder): os.makedirs(out_folder)
         client = genai.Client(api_key=args.key)
         
+        # Load and format the glossary once
+        glossary_content = load_glossary(args.glossary)
+        
         # Gather all processable files in the sections folder
         # For .txt inputs, it just looks in the current folder if necessary, but usually we use sections_ folder
         folder_to_scan = sec_folder if os.path.exists(sec_folder) else "."
@@ -192,8 +231,13 @@ def main():
                         payload = client.files.get(name=payload.name)
                 else: continue
 
-                # Two-pass translation could be added here, currently single pass with prompt
-                prompt = f"Translate the following to {args.lang}.\n\nSTYLE GUIDE:\n{STYLE_GUIDE}\n\nCONTENT:\n"
+                # Prepare final prompt
+                prompt = (
+                    f"Translate the following to {args.lang}.\n\n"
+                    f"GLOSSARY:\n{glossary_content}\n\n"
+                    f"STYLE GUIDE:\n{STYLE_GUIDE}\n\n"
+                    f"CONTENT:\n"
+                )
                 response = client.models.generate_content(model=MODEL_NAME, contents=[payload, prompt])
                 
                 with open(target_path, 'w', encoding='utf-8') as f: f.write(response.text)
