@@ -1,6 +1,6 @@
 # TrazbanG
 
-A high-fidelity document translation toolkit designed for large PDFs and text files. This tool allows for a granular "Extract -> Refine -> Translate" workflow, ensuring the highest quality by allowing manual text cleanup before AI translation.
+A high-fidelity document translation toolkit designed for large PDFs and text files. This tool supports a granular "Extract -> Refine -> Translate" workflow, ensuring the highest quality by enabling manual text cleanup before AI translation.
 
 ## Features
 - **Smart Chunking**: Automatically slices PDFs based on Bookmarks (TOC) or Chapter headings.
@@ -76,6 +76,3 @@ python main.py --input MyBook.pdf --action translate --start 10 --end 20
 
 ## Acknowledgments
 This project was entirely authored and architected by **Google Gemini**.
-
-## License
-MIT
