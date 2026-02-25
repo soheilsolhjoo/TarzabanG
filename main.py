@@ -7,14 +7,18 @@ CORE WORKFLOW:
 1. SLICE:   Break a large PDF into manageable segments based on bookmarks or chapters.
 2. EXTRACT: Pull raw text from those segments for manual cleanup.
 3. REFINE:  (User Action) Edit the generated .txt files in the sections folder.
-4. TRANSLATE: Submit the refined text or raw PDF segments to Gemini for translation.
+4. TRANSLATE: Submit refined text or raw PDF segments to Gemini for a two-pass translation:
+   - Pass 1 (Draft): Focuses on conceptual completeness and glossary adherence.
+   - Pass 2 (Final): Polishes the draft for natural flow and linguistic elegance.
 
 FOLDER STRUCTURE:
 - sections_<input_name>/: Created during 'slice' or 'extract'. Stores segment PDFs/TXTs.
-- translations_<input_name>/: Created during 'translate'. Stores final translations.
+- translations_<input_name>/: Created during 'translate'. Stores both versions:
+    - <name>_draft.txt: The literal technical draft.
+    - <name>_final.txt: The refined, eloquent translation.
 
 Re-TRANSLATION:
-The code cannot re-translate a text, unless you remove/rename the existing translated file(s).
+The code cannot re-translate a text unless you remove/rename the existing translated file(s).
 
 COMMAND EXAMPLES:
 - Prepare everything for a new book (slice + extract):
@@ -44,11 +48,21 @@ MODEL_NAME = "gemini-flash-latest"
 GLOSSARY_PATH = "glossary.txt"
 LOG_FILE = "translation_progress.log"
 
-# Detailed instructions for the AI to ensure translation quality
-STYLE_GUIDE = """
+# --- STYLE GUIDELINES ---
+# Pass 1: Technical Accuracy
+DRAFT_STYLE_GUIDE = """
 - Tone: Professional and serious.
 - Structure: Keep sentence lengths as close to the original as possible.
 - Constraint: Do not add, remove, or summarize sentences.
+"""
+
+# Pass 2: Eloquent Refinement
+REFINE_STYLE_GUIDE = """
+- Role: Master scholar and literary editor in the target language.
+- Task: Rewrite the draft to make it sound natural, professional, and fluent (Ketabi/literary style).
+- Fidelity: Conceptual fidelity is SACRED. Do not add or omit any ideas.
+- Syntax: You may break long sentences or reorder phrases to follow the natural syntax of the target language.
+- Goal: Eliminate 'Translationese' (stiff structures resulting from direct translation).
 """
 
 def get_args():
@@ -203,7 +217,6 @@ def main():
         glossary_content = load_glossary(args.glossary)
         
         # Gather all processable files in the sections folder
-        # For .txt inputs, it just looks in the current folder if necessary, but usually we use sections_ folder
         folder_to_scan = sec_folder if os.path.exists(sec_folder) else "."
         files = sorted([f for f in os.listdir(folder_to_scan) if f.endswith('.pdf') or f.endswith('.txt')])
         base_names = sorted(list(set([f.rsplit('.', 1)[0] for f in files])))
@@ -213,8 +226,12 @@ def main():
             idx = int(match.group(1)) if match else 0
             if not is_in_range(idx, args): continue
 
-            target_path = os.path.join(out_folder, f"{base}.txt")
-            if os.path.exists(target_path): continue
+            target_path_final = os.path.join(out_folder, f"{base}_final.txt")
+            target_path_draft = os.path.join(out_folder, f"{base}_draft.txt")
+            
+            # Skip only if the final version already exists
+            if os.path.exists(target_path_final):
+                continue
 
             print(f"Translating index {idx} ({base})...")
             try:
@@ -231,16 +248,38 @@ def main():
                         payload = client.files.get(name=payload.name)
                 else: continue
 
-                # Prepare final prompt
-                prompt = (
+                # --- PASS 1: TECHNICAL DRAFT ---
+                draft_prompt = (
                     f"Translate the following to {args.lang}.\n\n"
                     f"GLOSSARY:\n{glossary_content}\n\n"
-                    f"STYLE GUIDE:\n{STYLE_GUIDE}\n\n"
+                    f"STYLE GUIDE:\n{DRAFT_STYLE_GUIDE}\n\n"
                     f"CONTENT:\n"
                 )
-                response = client.models.generate_content(model=MODEL_NAME, contents=[payload, prompt])
+                draft_response = client.models.generate_content(model=MODEL_NAME, contents=[payload, draft_prompt])
+                draft_text = draft_response.text
                 
-                with open(target_path, 'w', encoding='utf-8') as f: f.write(response.text)
+                # Save the Draft
+                with open(target_path_draft, 'w', encoding='utf-8') as f:
+                    f.write(draft_text)
+                print(f"  - Draft saved.")
+
+                # --- PASS 2: ELOQUENT REFINEMENT ---
+                refine_prompt = (
+                    f"You are refining a translation into {args.lang}.\n\n"
+                    f"GLOSSARY:\n{glossary_content}\n\n"
+                    f"STYLE GUIDE:\n{REFINE_STYLE_GUIDE}\n\n"
+                    f"Original Source (for context):\n{payload if isinstance(payload, str) else '[PDF Content]'}\n\n"
+                    f"Draft to Refine:\n{draft_text}\n\n"
+                    f"Output ONLY the final polished {args.lang} text."
+                )
+                final_response = client.models.generate_content(model=MODEL_NAME, contents=[refine_prompt])
+                final_text = final_response.text
+
+                # Save the Final version
+                with open(target_path_final, 'w', encoding='utf-8') as f:
+                    f.write(final_text)
+                print(f"  - Final refined version saved.")
+                
                 logging.info(f"Successfully translated index {idx}: {base}")
                 
             except Exception as e:
